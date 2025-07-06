@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Face + Location Auth</title>
+</head>
+<body>
+  <h2>📸 Face + 🗺️ Location Authentication</h2>
+  <video id="video" width="320" height="240" autoplay></video><br><br>
+  <button onclick="capture()">📸 Capture & Validate</button>
+
+  <h3>🧾 Result:</h3>
+  <pre id="status">Waiting for capture...</pre>
+
+  <script>
+    const video = document.getElementById('video');
+    const status = document.getElementById('status');
+
+    // Start webcam
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => { video.srcObject = stream; })
+      .catch(err => { status.innerText = "❌ Cannot access webcam: " + err; });
+
+    async function capture() {
+      status.innerText = "⏳ Capturing and getting location...";
+
+      // Get location
+      let coords;
+      try {
+        coords = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(
+            pos => resolve(pos.coords),
+            err => reject("❌ Location denied or failed")
+          );
+        });
+      } catch (err) {
+        status.innerText = err;
+        return;
+      }
+
+      // Capture webcam image
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg'));
+
+      const formData = new FormData();
+      formData.append("file", blob, "photo.jpg");
+      formData.append("latitude", coords.latitude);
+      formData.append("longitude", coords.longitude);
+
+      // Send to backend
+      try {
+        const res = await fetch("http://192.168.0.103:8000/validate/", {
+          method: "POST",
+          body: formData
+        });
+        const result = await res.json();
+
+        if (res.ok) {
+          status.innerText = `
+✅ Face Matched: ${result.face_matched}
+📁 Matched With: ${result.matched_with || "None"}
+🔢 Similarity: ${result.similarity?.toFixed(2) || 0}%
+📍 Within Geo-Fence: ${result.location_ok}
+📏 Distance from center: ${result.distance_m} meters
+🚦 Final Status: ${result.status || "Unknown"}
+          `.trim();
+        } else {
+          status.innerText = `❌ Error: ${result.reason || result.detail || "Unknown error"}`;
+        }
+      } catch (err) {
+        status.innerText = `❌ Failed to connect to server: ${err}`;
+      }
+    }
+  </script>
+</body>
+</html>
